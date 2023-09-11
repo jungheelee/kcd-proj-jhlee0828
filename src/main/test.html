@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Title</title>
+    <script src="https://cdn.iamport.kr/v1/iamport.js"></script>
+
+    <button onclick="requestPay()">결제하기</button>
+
+    <script>
+        const userCode = "aa001";
+        IMP.init(userCode);
+
+        function requestPay() {
+            IMP.request_pay({
+                pg: "html5_inisis",
+                pay_method: "card",
+                merchant_uid: "maylee",
+                amount: 1000,
+                buyer_tel: "",
+            });
+        }
+    </script>
+</head>
+<body>
+
+</body>
+</html>
