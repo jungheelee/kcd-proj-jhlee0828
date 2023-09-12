@@ -36,18 +36,6 @@ class GlobalControllerAdvice {
         return buildResponse(e, HttpStatus.NOT_FOUND)
     }
 
-    @ExceptionHandler(PortOneException::class)
-    fun handlePortOneException(e: PortOneException): ResponseEntity<Map<String, Any>> {
-        logger.error("PortOneException occurred: ${e.message}", e)
-
-        return ResponseEntity(
-            mapOf(
-                "errorCode" to e.errorCode,
-                "message" to e.message
-            ), HttpStatus.INTERNAL_SERVER_ERROR
-        )
-    }
-
     private fun buildResponse(e: CardException, status: HttpStatus): ResponseEntity<Map<String, Any>> {
         val responseBody = mapOf(
             "errorCode" to e.errorCode,
@@ -56,7 +44,6 @@ class GlobalControllerAdvice {
         return ResponseEntity(responseBody, status)
     }
 }
-
 
 data class ApiResponse<T>(
     val status: String,

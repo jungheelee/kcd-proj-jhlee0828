@@ -2,10 +2,7 @@ package com.kcd.payment.paymentsystem.service
 
 import com.kcd.payment.paymentsystem.ApiResponse
 import com.kcd.payment.paymentsystem.domain.*
-import com.kcd.payment.paymentsystem.exception.CardNotFoundException
-import com.kcd.payment.paymentsystem.exception.ExpiredTransactionException
-import com.kcd.payment.paymentsystem.exception.PaymentFailedException
-import com.kcd.payment.paymentsystem.exception.TransactionKeyNotFoundException
+import com.kcd.payment.paymentsystem.exception.*
 import com.kcd.payment.paymentsystem.present.PaymentExecutionRequest
 import com.kcd.payment.paymentsystem.present.PaymentExecutionResponse
 import com.kcd.payment.paymentsystem.present.PaymentInfo
@@ -26,6 +23,7 @@ class PaymentService(
     private val paymentHistoryRepository: PaymentHistoryRepository,
     private val cardRepository: CardRepository,
     private val portOneService: PortOneService,
+    private val webhookService: WebhookService,
 ) {
 
     @PersistenceContext
@@ -60,18 +58,22 @@ class PaymentService(
 
     @Transactional
     fun executePayment(request: PaymentExecutionRequest): ApiResponse<PaymentExecutionResponse> {
-        logger.info("Executing payment for transactionId: ${request.transactionKey}")
+        logger.info("Executing payment for transactionKey: ${request.transactionKey}")
         val payment = validateAndGetPayment(request.transactionKey)
+        val card = validAndGetCard(payment)
 
         return try {
-            val card = fetchCardOrThrow(payment)
             executeAndFinalizePayment(payment, card, request)
-        } catch (e: Exception) {
+        } catch (e: PortOneException) {
+            handlePortOneException(e, payment, request)
+        } catch (e: PaymentException) {
             handlePaymentFailure(e, payment, request)
+        } catch (e: Exception) {
+            handleUnexpectedFailure(e, payment, request)
         }
     }
 
-    private fun fetchCardOrThrow(payment: PaymentEntity): CardEntity {
+    private fun validAndGetCard(payment: PaymentEntity): CardEntity {
         return cardRepository.findById(payment.cardId)
             .orElseThrow { CardNotFoundException(payment.customerKey) }
     }
@@ -95,18 +97,53 @@ class PaymentService(
         )
     }
 
-    // 결제 실패 시
-    private fun handlePaymentFailure(
-        e: Exception,
+    private fun handlePortOneException(
+        e: PortOneException,
         payment: PaymentEntity,
         request: PaymentExecutionRequest
     ): ApiResponse<PaymentExecutionResponse> {
         savePaymentStatusWithHistory(payment, PaymentStatus.ABORTED)
-        logger.error("Payment failed: errorCode=${PaymentStatus.ABORTED}, message=${e.message}", e)
+
+        sendPaymentFailureNotification(request, payment, e)
+
+        return ApiResponse.fail(
+            message = "PortOneException occurred",
+            errorCode = e.errorCode,
+            errorMessage = e.message
+        )
+    }
+
+    // 결제 실패 시
+    private fun handlePaymentFailure(
+        e: PaymentException,
+        payment: PaymentEntity,
+        request: PaymentExecutionRequest
+    ): ApiResponse<PaymentExecutionResponse> {
+        savePaymentStatusWithHistory(payment, PaymentStatus.ABORTED)
+        sendPaymentFailureNotification(request, payment, e)
 
         return ApiResponse.fail(
             message = "Payment Failed",
             errorCode = "PAYMENT_FAILED",
+            errorMessage = e.message
+        )
+    }
+
+    private fun handleUnexpectedFailure(
+        e: Exception,
+        payment: PaymentEntity,
+        request: PaymentExecutionRequest
+    ): ApiResponse<PaymentExecutionResponse> {
+        savePaymentStatusWithHistory(payment, PaymentStatus.UNKNOWN)
+        logger.error(
+            "Unexpected failure: transactionKey=${payment.transactionKey} customerKey=${request.customerKey} errorCode=${PaymentStatus.UNKNOWN}, message=${e.message}",
+            e
+        )
+        sendPaymentFailureNotification(request, payment, e)
+
+        return ApiResponse.fail(
+            message = "Unexpected Failure",
+            errorCode = "UNEXPECTED_FAILURE",
             errorMessage = e.message
         )
     }
@@ -155,6 +192,15 @@ class PaymentService(
         )
     }
 
+    // 오류 발생 시 알림을 줄 훅 정보가 있다면 해당 URL을 호출한다.
+    private fun sendPaymentFailureNotification(request: PaymentExecutionRequest, payment: PaymentEntity, e: Exception) {
+        request.webhookUrl?.let {
+            webhookService.callPaymentFailedWebhook(
+                webhookUrl = it,
+                transactionKey = request.transactionKey,
+                cardKey = payment.customerKey,
+                reason = e.message ?: "",
+            )
+        }
+    }
 }
-
-
