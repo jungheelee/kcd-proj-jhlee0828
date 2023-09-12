@@ -14,11 +14,9 @@ import org.springframework.http.HttpMethod
 import org.springframework.stereotype.Service
 import org.springframework.web.client.RestTemplate
 
-
 @Service
 class PortOneService(
     private val restTemplate: RestTemplate,
-    private val webhookService: WebhookService,
 ) {
     @Value("\${pgmodule.imp_key}")
     lateinit var IMP_KEY: String
@@ -113,14 +111,9 @@ class PortOneService(
         } catch (e: PortOneException) {
             throw e
         }  catch (e: Exception) {
-            handlePaymentFailure(request, payment, e)
-            logger.error(buildErrorMessage(card, payment, e))
-            throw PaymentFailedException(e.message ?: "")
+            throw PaymentFailedException(e.message ?: "customerKey: ${card.customerKey} | transactionKey: ${payment.transactionKey} | ${e.message}")
         }
 
-    }
-    private fun buildErrorMessage(card: CardEntity, payment: PaymentEntity, e: Exception): String {
-        return "[Failed to issuePayment] customerKey: ${card.customerKey} | transactionKey: ${payment.transactionKey} | ${e.message}"
     }
 
     /**
@@ -154,17 +147,5 @@ class PortOneService(
 
         return token!!;
 
-    }
-
-    // 오류 발생 시 알림을 줄 훅 정보가 있다면 해당 URL을 호출한다.
-    private fun handlePaymentFailure(request: PaymentExecutionRequest, payment: PaymentEntity, e: Exception) {
-        request.webhookUrl?.let {
-            webhookService.callPaymentFailedWebhook(
-                webhookUrl = it,
-                transactionKey = request.transactionKey,
-                cardKey = payment.customerKey,
-                reason = e.message ?: "",
-            )
-        }
     }
 }
