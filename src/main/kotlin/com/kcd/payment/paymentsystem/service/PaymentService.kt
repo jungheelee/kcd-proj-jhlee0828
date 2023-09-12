@@ -35,8 +35,9 @@ class PaymentService(
     @Transactional
     fun initiatePayment(paymentRequest: PaymentInitRequest): ApiResponse<PaymentInfo> {
         return with(paymentRequest) {
-//            val card = cardId?.let { cardRepository.findById(it).orElseThrow { CardNotFoundException(cardId!!) } }
-            val card = paymentRequest.customerKey?.let { cardRepository.findByCustomerKey(it) }
+            val card = paymentRequest.customerKey?.let {
+                cardRepository.findByCustomerKey(it) ?: throw CardNotFoundException(customerKey!!)
+            }
             val payment = PaymentEntity(
                 customerKey = card!!.customerKey,
                 cardId = card.id!!,
@@ -44,7 +45,15 @@ class PaymentService(
                 payMethod = PayMethod.CARD
             ).also { paymentRepository.save(it) }
 
-            payment.id?.let { paymentHistoryRepository.save(PaymentHistoryEntity(paymentId = it)) }
+            payment.id?.let {
+                paymentHistoryRepository.save(
+                    PaymentHistoryEntity(
+                        paymentId = it,
+                        transactionKey = paymentRequest.transactionKey,
+                        paymentStatus = PaymentStatus.READY
+                    )
+                )
+            }
             ApiResponse.success(PaymentInfo(transactionKey = payment.transactionKey))
         }
     }
@@ -64,10 +73,14 @@ class PaymentService(
 
     private fun fetchCardOrThrow(payment: PaymentEntity): CardEntity {
         return cardRepository.findById(payment.cardId)
-            .orElseThrow { CardNotFoundException(payment.cardId) }
+            .orElseThrow { CardNotFoundException(payment.customerKey) }
     }
 
-    private fun executeAndFinalizePayment(payment: PaymentEntity, card: CardEntity, request: PaymentExecutionRequest): ApiResponse<PaymentExecutionResponse> {
+    private fun executeAndFinalizePayment(
+        payment: PaymentEntity,
+        card: CardEntity,
+        request: PaymentExecutionRequest
+    ): ApiResponse<PaymentExecutionResponse> {
         savePaymentStatusWithHistory(payment, PaymentStatus.IN_PROGRESS)
 
         val portOneResponse = portOneService.issuePayment(payment, card, request)
@@ -83,7 +96,11 @@ class PaymentService(
     }
 
     // 결제 실패 시
-    private fun handlePaymentFailure(e:Exception, payment: PaymentEntity, request: PaymentExecutionRequest): ApiResponse<PaymentExecutionResponse> {
+    private fun handlePaymentFailure(
+        e: Exception,
+        payment: PaymentEntity,
+        request: PaymentExecutionRequest
+    ): ApiResponse<PaymentExecutionResponse> {
         savePaymentStatusWithHistory(payment, PaymentStatus.ABORTED)
         logger.error("Payment failed: errorCode=${PaymentStatus.ABORTED}, message=${e.message}", e)
 
@@ -139,6 +156,5 @@ class PaymentService(
     }
 
 }
-
 
 
