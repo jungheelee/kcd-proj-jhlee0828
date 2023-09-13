@@ -76,6 +76,7 @@ class PaymentEntity(
             READY -> {}
             REJECTED -> {}
             ABORTED -> {}
+            UNKNOWN -> {}
         }
     }
 }
